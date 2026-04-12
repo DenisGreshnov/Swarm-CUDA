@@ -1,0 +1,44 @@
+# Сборочная папка
+build/
+out/
+cmake-build-*/
+
+# Файлы Visual Studio
+.vs/
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+*.suo
+
+# Файлы VS Code
+.vscode/
+*.code-workspace
+
+# Файлы CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+*.cmake
+!CMakeLists.txt
+
+# Объектные файлы и библиотеки
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.exe
+*.pdb
+
+# Файлы CUDA
+*.ptx
+*.cubin
+*.fatbin
+
+# Временные файлы
+*~
+*.swp
+.DS_Store
+Thumbs.db
