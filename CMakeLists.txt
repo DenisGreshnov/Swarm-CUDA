@@ -4,21 +4,30 @@ project(FlockingCUDA LANGUAGES CXX CUDA)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CUDA_STANDARD 14)
 
+# Архитектура CUDA (RTX 4080 = Compute Capability 8.9)
+set(CMAKE_CUDA_ARCHITECTURES 89)
+
+# --- Поиск зависимостей ---
 find_package(OpenGL REQUIRED)
-find_package(glfw3 REQUIRED)
+find_package(glfw3 CONFIG REQUIRED)   # vcpkg предоставляет glfw3Config.cmake
+find_package(GLEW REQUIRED)           # vcpkg предоставляет GLEW
 
-# Включаем поддержку CUDA
-enable_language(CUDA)
-
+# --- Основной исполняемый файл ---
 add_executable(flocking_sim
     main.cpp
     renderer.cpp
     simulation.cu
 )
 
-set_target_properties(flocking_sim PROPERTIES
-    CUDA_ARCHITECTURES "89"   # для RTX 4080 (Compute Capability 8.9, можно указать 86)
+# Подключаем заголовки
+target_include_directories(flocking_sim PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_include_directories(flocking_sim PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(flocking_sim OpenGL::GL glfw ${CUDA_LIBRARIES})
+# Линкуем библиотеки
+target_link_libraries(flocking_sim
+    OpenGL::GL
+    glfw
+    GLEW::GLEW
+    ${CUDA_LIBRARIES}
+)

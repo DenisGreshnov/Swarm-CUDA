@@ -218,11 +218,11 @@ __global__ void integrate_kernel(Agent* agents, int num_agents, double delta_tim
 // ----------------------------------------------------------------------
 FlockSimulation::FlockSimulation() {
     // Параметры по умолчанию
-    params.desired_distance   = 40.0;
-    params.interaction_range  = 48.0;
-    params.obstacle_range     = 30.0;
+    params.desired_distance   = 10.0;
+    params.interaction_range  = 13.0;
+    params.obstacle_range     = 8.0;
     params.c1_alpha = 8.0;  params.c2_alpha = 6.0;
-    params.c1_beta  = 5.0;  params.c2_beta  = 2.0;
+    params.c1_beta  = 100.0;  params.c2_beta  = 10.0;
     params.c1_gamma = 7.0;  params.c2_gamma = 5.0;
     params.epsilon = 0.1;
     params.h_alpha = 0.2;  params.h_beta = 0.8;

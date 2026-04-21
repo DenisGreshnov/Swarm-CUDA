@@ -103,7 +103,7 @@ private:
     int*       d_beta_count = nullptr;   // количество сгенерированных β-агентов
 
     // Размеры массивов на GPU
-    int num_agents = 20;
+    int num_agents = 1000;
     int num_obstacles = 0;
     int max_obstacles = 1000;
     int max_beta_agents = 2000;          // оценка сверху

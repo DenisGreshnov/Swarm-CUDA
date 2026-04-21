@@ -60,6 +60,11 @@ void print_simulation_info(const FlockSimulation& simulation) {
     }
 }
 
+struct AppContext {
+    FlockSimulation* sim;
+    Renderer* renderer;
+};
+
 int main() {
     std::cout << "Starting Flocking Simulation (Algorithm 3)..." << std::endl;
     
@@ -73,29 +78,35 @@ int main() {
     // Создание симуляции
     FlockSimulation simulation;
     simulation.start();
+
+    AppContext ctx;
+    ctx.sim = &simulation;
+    ctx.renderer = &renderer;
+    glfwSetWindowUserPointer(renderer.get_window(), &ctx);
     
     // Устанавливаем начальную цель в центре
     simulation.set_target(Vector2(0, 0));
     
     // Колбэк для мыши
     glfwSetMouseButtonCallback(renderer.get_window(), [](GLFWwindow* window, int button, int action, int mods) {
+        auto* ctx = static_cast<AppContext*>(glfwGetWindowUserPointer(window));
+        if (!ctx) return;
+        // Обработка камеры (правая кнопка)
+        if (ctx->renderer) ctx->renderer->on_mouse_button(button, action, mods);
         if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
-            FlockSimulation* sim = static_cast<FlockSimulation*>(glfwGetWindowUserPointer(window));
-            
-            if (sim) {
+            AppContext* ctx = static_cast<AppContext*>(glfwGetWindowUserPointer(window));
+            if (!ctx) return;
+            FlockSimulation* sim = ctx->sim;
+            Renderer* rend = ctx->renderer;
+            if (sim && rend) {
                 double x, y;
                 glfwGetCursorPos(window, &x, &y);
-                
-                Renderer* rend = static_cast<Renderer*>(glfwGetWindowUserPointer(window));
                 Vector2 world_pos = rend->screen_to_world(x, y);
-                
                 if (setting_target) {
                     sim->set_target(world_pos);
-                    std::cout << "\n=== TARGET SET ===" << std::endl;
                 } else if (adding_obstacles) {
-                    double radius = 10.0 + (rand() % 10); // Размер от 10 до 19
+                    double radius = 10.0 + (rand() % 10);
                     sim->add_obstacle(world_pos, radius);
-                    std::cout << "\n=== OBSTACLE ADDED ===" << std::endl;
                 }
             }
         }
@@ -103,41 +114,48 @@ int main() {
     
     // Колбэк для клавиш
     glfwSetKeyCallback(renderer.get_window(), [](GLFWwindow* window, int key, int scancode, int action, int mods) {
+        auto* ctx = static_cast<AppContext*>(glfwGetWindowUserPointer(window));
+        if (!ctx) return;
+        // Обработка камеры
+        if (ctx->renderer) ctx->renderer->on_key(key, action, mods);
         if (action == GLFW_PRESS) {
-            FlockSimulation* sim = static_cast<FlockSimulation*>(glfwGetWindowUserPointer(window));
+            AppContext* ctx = static_cast<AppContext*>(glfwGetWindowUserPointer(window));
+            if (!ctx) return;
+            FlockSimulation* sim = ctx->sim;
+            Renderer* rend = ctx->renderer;
             
             switch (key) {
                 case GLFW_KEY_T:
                     setting_target = true;
                     adding_obstacles = false;
                     sim->enable_target(); // Включаем цель при переходе в режим установки цели
-                    std::cout << "\n🎯 MODE: Set Target (click to set flock target)" << std::endl;
+                    std::cout << "\nMODE: Set Target (click to set flock target)" << std::endl;
                     break;
                     
                 case GLFW_KEY_O:
                     setting_target = false;
                     adding_obstacles = true;
-                    std::cout << "\n🚧 MODE: Add Obstacles (click to place obstacles)" << std::endl;
+                    std::cout << "\nMODE: Add Obstacles (click to place obstacles)" << std::endl;
                     break;
                     
                 case GLFW_KEY_C:
                     if (sim) {
                         sim->clear_obstacles();
-                        std::cout << "\n🧹 All obstacles cleared" << std::endl;
+                        std::cout << "\nAll obstacles cleared" << std::endl;
                     }
                     break;
                     
                 case GLFW_KEY_B:
                     if (sim) {
                         sim->toggle_beta_display();
-                        std::cout << "\nβ-AGENTS: " << (sim->is_beta_display_enabled() ? "VISIBLE" : "HIDDEN") << std::endl;
+                        std::cout << "\nbeta-AGENTS: " << (sim->is_beta_display_enabled() ? "VISIBLE" : "HIDDEN") << std::endl;
                     }
                     break;
                     
                 case GLFW_KEY_X:
                     if (sim) {
                         sim->remove_target();
-                        std::cout << "\n❌ TARGET REMOVED - Flocking without navigation" << std::endl;
+                        std::cout << "\nTARGET REMOVED - Flocking without navigation" << std::endl;
                         std::cout << "Agents will maintain swarm behavior and obstacle avoidance only" << std::endl;
                     }
                     break;
@@ -145,7 +163,7 @@ int main() {
                 case GLFW_KEY_G: // НОВАЯ КЛАВИША: переключение отображения сетки связей
                     if (sim) {
                         sim->toggle_connections();
-                        std::cout << "\n🔗 CONNECTIONS: " << (sim->is_connections_display_enabled() ? "SHOW" : "HIDE") << std::endl;
+                        std::cout << "\nCONNECTIONS: " << (sim->is_connections_display_enabled() ? "SHOW" : "HIDE") << std::endl;
                     }
                     break;
                     
@@ -158,7 +176,7 @@ int main() {
                     std::cout << "T - Set target mode (click to set flock target)" << std::endl;
                     std::cout << "O - Add obstacle mode (click to place obstacles)" << std::endl;
                     std::cout << "C - Clear all obstacles" << std::endl;
-                    std::cout << "B - Toggle β-agents display" << std::endl;
+                    std::cout << "B - Toggle beta-agents display" << std::endl;
                     std::cout << "X - Remove target (swarm only mode)" << std::endl;
                     std::cout << "G - Toggle connections display" << std::endl; // НОВОЕ
                     std::cout << "H - Show this help" << std::endl;
@@ -168,9 +186,19 @@ int main() {
             }
         }
     });
+
+    glfwSetCursorPosCallback(renderer.get_window(), [](GLFWwindow* w, double x, double y) {
+        auto* ctx = static_cast<AppContext*>(glfwGetWindowUserPointer(w));
+        if (ctx && ctx->renderer) ctx->renderer->on_cursor_pos(x, y);
+    });
+
+    glfwSetScrollCallback(renderer.get_window(), [](GLFWwindow* w, double xoff, double yoff) {
+        auto* ctx = static_cast<AppContext*>(glfwGetWindowUserPointer(w));
+        if (ctx && ctx->renderer) ctx->renderer->on_scroll(xoff, yoff);
+    });
     
     // Сохраняем указатель для колбэков
-    glfwSetWindowUserPointer(renderer.get_window(), &simulation);
+    glfwSetWindowUserPointer(renderer.get_window(), &ctx);
     
     // Главный цикл
     auto last_sim_time = std::chrono::steady_clock::now();
@@ -180,7 +208,7 @@ int main() {
     std::cout << "T - Set target mode (click to set flock target)" << std::endl;
     std::cout << "O - Add obstacle mode (click to place obstacles)" << std::endl;
     std::cout << "C - Clear all obstacles" << std::endl;
-    std::cout << "B - Toggle β-agents display" << std::endl;
+    std::cout << "B - Toggle beta-agents display" << std::endl;
     std::cout << "X - Remove target (swarm only mode)" << std::endl;
     std::cout << "G - Toggle connections display" << std::endl; // НОВОЕ
     std::cout << "H - Show this help" << std::endl;
@@ -188,7 +216,7 @@ int main() {
     std::cout << "=====================================" << std::endl;
     std::cout << "Current mode: " << (setting_target ? "SET TARGET" : "ADD OBSTACLES") << std::endl;
     std::cout << "Target: " << (simulation.is_target_enabled() ? "ENABLED" : "DISABLED") << std::endl;
-    std::cout << "β-agents display: " << (simulation.is_beta_display_enabled() ? "ON" : "OFF") << std::endl;
+    std::cout << "beta-agents display: " << (simulation.is_beta_display_enabled() ? "ON" : "OFF") << std::endl;
     std::cout << "Connections display: " << (simulation.is_connections_display_enabled() ? "ON" : "OFF") << std::endl;
     
     while (!renderer.should_close()) {
@@ -198,24 +226,19 @@ int main() {
         auto sim_elapsed = std::chrono::duration_cast<std::chrono::duration<double>>(current_time - last_sim_time);
         double delta_time = std::min(sim_elapsed.count(), 0.1);
         
+        auto sim_start = std::chrono::steady_clock::now();
+
         if (simulation.is_running()) {
             simulation.step(delta_time);
         }
+        auto sim_end = std::chrono::steady_clock::now();
+        double sim_ms = std::chrono::duration<double, std::milli>(sim_end - sim_start).count();
+        renderer.set_sim_time(sim_ms);
+
         last_sim_time = current_time;
-        
-        // Рендеринг с ограничением FPS (~60 FPS)
-        auto frame_elapsed = std::chrono::duration_cast<std::chrono::duration<double>>(current_time - last_frame_time);
-        if (frame_elapsed.count() >= 1.0/60.0) {
-            renderer.render(simulation);
-            last_frame_time = current_time;
-        }
-        
-        // Вывод информации о симуляции
-        print_simulation_info(simulation);
-        
+
+        renderer.render(simulation);
         renderer.poll_events();
-        
-        // Небольшая задержка для снижения нагрузки на CPU
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     
