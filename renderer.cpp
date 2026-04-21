@@ -216,10 +216,10 @@ void Renderer::render(FlockSimulation& simulation) {
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     // Установка матриц проекции и вида с учётом камеры
-    float left   = -200.0f / zoom + camera_offset.x;
-    float right  =  200.0f / zoom + camera_offset.x;
-    float bottom = -200.0f / zoom + camera_offset.y;
-    float top    =  200.0f / zoom + camera_offset.y;
+    float left   = -WORLD_BOUNDARY / zoom + camera_offset.x;
+    float right  =  WORLD_BOUNDARY / zoom + camera_offset.x;
+    float bottom = -WORLD_BOUNDARY / zoom + camera_offset.y;
+    float top    =  WORLD_BOUNDARY / zoom + camera_offset.y;
 
     float projection[16] = {
         2.0f/(right-left), 0.0f, 0.0f, 0.0f,
@@ -446,7 +446,7 @@ void Renderer::build_connections_geometry(const FlockSimulation& simulation) {
 void Renderer::build_grid_geometry() {
     std::vector<Vertex> vertices;
     float step = 20.0f;
-    float range = 200.0f;
+    float range = WORLD_BOUNDARY;
     // Вертикальные линии
     for (float x = -range; x <= range; x += step) {
         add_line(vertices, Vector2(x, -range), Vector2(x, range), 0.3f, 0.3f, 0.3f);
@@ -507,8 +507,8 @@ void Renderer::on_cursor_pos(double xpos, double ypos) {
         double dx = xpos - last_mouse_x;
         double dy = ypos - last_mouse_y;
         // Масштабирование с учётом зума и размера окна
-        float world_dx = (dx / window_width) * (400.0f / zoom);
-        float world_dy = (dy / window_height) * (400.0f / zoom);
+        float world_dx = (dx / window_width) * (WORLD_BOUNDARY * 2 / zoom);
+        float world_dy = (dy / window_height) * (WORLD_BOUNDARY * 2 / zoom);
         camera_offset.x -= world_dx;
         camera_offset.y += world_dy; // ось Y перевёрнута
         last_mouse_x = xpos;
@@ -536,10 +536,10 @@ void Renderer::on_key(int key, int action, int mods) {
 
 Vector2 Renderer::screen_to_world(double screen_x, double screen_y) const {
     // Преобразование с учётом текущей камеры
-    float left   = -200.0f / zoom + camera_offset.x;
-    float right  =  200.0f / zoom + camera_offset.x;
-    float bottom = -200.0f / zoom + camera_offset.y;
-    float top    =  200.0f / zoom + camera_offset.y;
+    float left   = -WORLD_BOUNDARY / zoom + camera_offset.x;
+    float right  =  WORLD_BOUNDARY / zoom + camera_offset.x;
+    float bottom = -WORLD_BOUNDARY / zoom + camera_offset.y;
+    float top    =  WORLD_BOUNDARY / zoom + camera_offset.y;
 
     float world_x = left + (screen_x / window_width) * (right - left);
     float world_y = bottom + (1.0 - screen_y / window_height) * (top - bottom);

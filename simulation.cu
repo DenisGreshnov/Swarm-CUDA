@@ -201,8 +201,8 @@ __global__ void integrate_kernel(Agent* agents, int num_agents, double delta_tim
     a.position = a.position + a.velocity * delta_time;
 
     // Мягкие границы
-    const double boundary = 200.0;
-    const double soft = 180.0;
+    const double boundary = WORLD_BOUNDARY;
+    const double soft = WORLD_BOUNDARY * 0.9;
     if (fabs(a.position.x) > soft) {
         double push = (boundary - fabs(a.position.x)) / (boundary - soft);
         a.velocity.x += (a.position.x > 0 ? -1.0 : 1.0) * push * 5.0;
@@ -219,7 +219,7 @@ __global__ void integrate_kernel(Agent* agents, int num_agents, double delta_tim
 FlockSimulation::FlockSimulation() {
     // Параметры по умолчанию
     params.desired_distance   = 10.0;
-    params.interaction_range  = 13.0;
+    params.interaction_range  = 12.0;
     params.obstacle_range     = 8.0;
     params.c1_alpha = 8.0;  params.c2_alpha = 6.0;
     params.c1_beta  = 100.0;  params.c2_beta  = 10.0;
@@ -234,7 +234,7 @@ FlockSimulation::FlockSimulation() {
     // Инициализация агентов на CPU
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_real_distribution<> dis(-150, 150);
+    std::uniform_real_distribution<> dis(-WORLD_BOUNDARY*0.75, WORLD_BOUNDARY*0.75);
     h_agents.resize(num_agents);
     for (int i = 0; i < num_agents; ++i) {
         h_agents[i].position = Vector2(dis(gen), dis(gen));

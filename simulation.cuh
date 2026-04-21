@@ -5,6 +5,8 @@
 #include <atomic>
 #include <cuda_runtime.h>
 
+#define WORLD_BOUNDARY 500.0
+
 // Простой 2D вектор (используется и на CPU, и на GPU)
 struct Vector2 {
     double x, y;
