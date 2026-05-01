@@ -43,6 +43,9 @@ private:
     // Загрузка и компиляция шейдеров
     unsigned int load_shaders(const char* vertex_source, const char* fragment_source);
 
+    // Вычисление текущих границ видимой области с учётом aspect ratio
+    void get_visible_bounds(float& left, float& right, float& bottom, float& top) const;
+
 public:
     Renderer(int width = 1000, int height = 800);
     ~Renderer();
@@ -59,6 +62,13 @@ public:
     GLFWwindow* get_window() const { return window; }
     int get_window_width() const { return window_width; }
     int get_window_height() const { return window_height; }
+
+    // Обновление размеров окна (например, из колбэка изменения размера)
+    void update_window_size(int width, int height) {
+        window_width = width;
+        window_height = height;
+        glViewport(0, 0, width, height);
+    }
 
     // Преобразование координат с учётом камеры
     Vector2 screen_to_world(double screen_x, double screen_y) const;

@@ -116,6 +116,9 @@ bool Renderer::initialize() {
         return false;
     }
 
+    // Устанавливаем вьюпорт сразу после создания контекста
+    glViewport(0, 0, window_width, window_height);
+
     // Загрузка шейдеров
     shader_program = load_shaders(vertex_shader_source, fragment_shader_source);
     if (!shader_program) return false;
@@ -185,7 +188,20 @@ unsigned int Renderer::load_shaders(const char* vertex_source, const char* fragm
     return program;
 }
 
+void Renderer::get_visible_bounds(float& left, float& right, float& bottom, float& top) const {
+    float aspect = (float)window_width / (float)window_height;
+    float half_h = WORLD_BOUNDARY / zoom;
+    float half_w = half_h * aspect;
+    left   = camera_offset.x - half_w;
+    right  = camera_offset.x + half_w;
+    bottom = camera_offset.y - half_h;
+    top    = camera_offset.y + half_h;
+}
+
 void Renderer::render(FlockSimulation& simulation) {
+    // Актуализируем вьюпорт на случай, если окно изменилось, а колбэк не отработал
+    glViewport(0, 0, window_width, window_height);
+
     // Измерение времени кадра
     auto now = std::chrono::steady_clock::now();
     std::chrono::duration<double> elapsed = now - last_frame_time;
@@ -215,11 +231,9 @@ void Renderer::render(FlockSimulation& simulation) {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // Установка матриц проекции и вида с учётом камеры
-    float left   = -WORLD_BOUNDARY / zoom + camera_offset.x;
-    float right  =  WORLD_BOUNDARY / zoom + camera_offset.x;
-    float bottom = -WORLD_BOUNDARY / zoom + camera_offset.y;
-    float top    =  WORLD_BOUNDARY / zoom + camera_offset.y;
+    // Получаем границы видимой области с учётом aspect ratio
+    float left, right, bottom, top;
+    get_visible_bounds(left, right, bottom, top);
 
     float projection[16] = {
         2.0f/(right-left), 0.0f, 0.0f, 0.0f,
@@ -403,43 +417,19 @@ void Renderer::build_target_geometry(const Vector2& target, bool enabled) {
 }
 
 void Renderer::build_connections_geometry(const FlockSimulation& simulation) {
-    std::vector<Vertex> vertices;
-    auto agents = simulation.get_agents();
-    auto beta_agents = simulation.get_beta_agents();
-    double alpha_range = simulation.get_interaction_range();
-    double beta_range = simulation.get_obstacle_range();
-
-    // α-α связи (белые полупрозрачные)
-    for (size_t i = 0; i < agents.size(); ++i) {
-        for (size_t j = i+1; j < agents.size(); ++j) {
-            Vector2 diff = agents[j].position - agents[i].position;
-            double dist = diff.length();
-            if (dist < alpha_range) {
-                float alpha = 1.0f - (float)(dist / alpha_range);
-                add_line(vertices, agents[i].position, agents[j].position, 1.0f, 1.0f, 1.0f);
-                // Прозрачность задаётся через uniform, но здесь для простоты цвет постоянный.
-                // В реальном приложении лучше вынести в отдельный uniform.
-            }
-        }
+    int count = simulation.get_connection_vertex_count();
+    if (count == 0) {
+        glBindBuffer(GL_ARRAY_BUFFER, vbo_connections);
+        glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
+        return;
     }
-
-    // α-β связи (оранжевые)
-    for (const auto& agent : agents) {
-        for (const auto& beta : beta_agents) {
-            Vector2 diff = beta.position - agent.position;
-            double dist = diff.length();
-            if (dist < beta_range) {
-                add_line(vertices, agent.position, beta.position, 1.0f, 0.5f, 0.0f);
-            }
-        }
-    }
-
+    const ConnectionVertex* verts = simulation.get_connection_vertices();
     glBindVertexArray(vao_connections);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_connections);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_DYNAMIC_DRAW);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
+    glBufferData(GL_ARRAY_BUFFER, count * sizeof(ConnectionVertex), verts, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(ConnectionVertex), (void*)0);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)(2*sizeof(float)));
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(ConnectionVertex), (void*)(2*sizeof(float)));
     glEnableVertexAttribArray(1);
 }
 
@@ -473,8 +463,6 @@ void Renderer::setup_callbacks(FlockSimulation* sim) {
     glfwSetMouseButtonCallback(window, [](GLFWwindow* w, int button, int action, int mods) {
         Renderer* r = static_cast<Renderer*>(glfwGetWindowUserPointer(w));
         r->on_mouse_button(button, action, mods);
-        // Также вызываем старый колбэк для установки цели/препятствий
-        // (нужно сохранить исходный указатель на симуляцию)
     });
     glfwSetCursorPosCallback(window, [](GLFWwindow* w, double x, double y) {
         Renderer* r = static_cast<Renderer*>(glfwGetWindowUserPointer(w));
@@ -499,16 +487,18 @@ void Renderer::on_mouse_button(int button, int action, int mods) {
             panning = false;
         }
     }
-    // Левую кнопку обрабатываем в main.cpp, но можно и здесь.
 }
 
 void Renderer::on_cursor_pos(double xpos, double ypos) {
     if (panning) {
         double dx = xpos - last_mouse_x;
         double dy = ypos - last_mouse_y;
-        // Масштабирование с учётом зума и размера окна
-        float world_dx = (dx / window_width) * (WORLD_BOUNDARY * 2 / zoom);
-        float world_dy = (dy / window_height) * (WORLD_BOUNDARY * 2 / zoom);
+        float left, right, bottom, top;
+        get_visible_bounds(left, right, bottom, top);
+        float vis_width = right - left;
+        float vis_height = top - bottom;
+        float world_dx = (dx / window_width) * vis_width;
+        float world_dy = (dy / window_height) * vis_height;
         camera_offset.x -= world_dx;
         camera_offset.y += world_dy; // ось Y перевёрнута
         last_mouse_x = xpos;
@@ -535,12 +525,8 @@ void Renderer::on_key(int key, int action, int mods) {
 }
 
 Vector2 Renderer::screen_to_world(double screen_x, double screen_y) const {
-    // Преобразование с учётом текущей камеры
-    float left   = -WORLD_BOUNDARY / zoom + camera_offset.x;
-    float right  =  WORLD_BOUNDARY / zoom + camera_offset.x;
-    float bottom = -WORLD_BOUNDARY / zoom + camera_offset.y;
-    float top    =  WORLD_BOUNDARY / zoom + camera_offset.y;
-
+    float left, right, bottom, top;
+    get_visible_bounds(left, right, bottom, top);
     float world_x = left + (screen_x / window_width) * (right - left);
     float world_y = bottom + (1.0 - screen_y / window_height) * (top - bottom);
     return Vector2(world_x, world_y);

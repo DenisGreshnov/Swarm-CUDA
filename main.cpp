@@ -23,7 +23,7 @@ int get_console_width() {
 #include <thread>
 #include <chrono>
 #include <iostream>
-#include <iomanip>  // Добавляем для std::setw
+#include <iomanip>
 #include <sstream> 
 
 // Глобальные переменные для управления режимами
@@ -48,7 +48,6 @@ void print_simulation_info(const FlockSimulation& simulation) {
         
         std::string info_str = oss.str();
         
-        // Обрезаем строку до ширины консоли
         int console_width = get_console_width();
         if (info_str.length() > console_width) {
             info_str = info_str.substr(0, console_width - 3) + "...";
@@ -87,6 +86,14 @@ int main() {
     // Устанавливаем начальную цель в центре
     simulation.set_target(Vector2(0, 0));
     
+    // Колбэк для изменения размеров окна (обновляет вьюпорт и размеры рендерера)
+    glfwSetFramebufferSizeCallback(renderer.get_window(), [](GLFWwindow* window, int width, int height) {
+        auto* ctx = static_cast<AppContext*>(glfwGetWindowUserPointer(window));
+        if (ctx && ctx->renderer) {
+            ctx->renderer->update_window_size(width, height);
+        }
+    });
+    
     // Колбэк для мыши
     glfwSetMouseButtonCallback(renderer.get_window(), [](GLFWwindow* window, int button, int action, int mods) {
         auto* ctx = static_cast<AppContext*>(glfwGetWindowUserPointer(window));
@@ -94,8 +101,6 @@ int main() {
         // Обработка камеры (правая кнопка)
         if (ctx->renderer) ctx->renderer->on_mouse_button(button, action, mods);
         if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
-            AppContext* ctx = static_cast<AppContext*>(glfwGetWindowUserPointer(window));
-            if (!ctx) return;
             FlockSimulation* sim = ctx->sim;
             Renderer* rend = ctx->renderer;
             if (sim && rend) {
@@ -119,8 +124,6 @@ int main() {
         // Обработка камеры
         if (ctx->renderer) ctx->renderer->on_key(key, action, mods);
         if (action == GLFW_PRESS) {
-            AppContext* ctx = static_cast<AppContext*>(glfwGetWindowUserPointer(window));
-            if (!ctx) return;
             FlockSimulation* sim = ctx->sim;
             Renderer* rend = ctx->renderer;
             
@@ -128,7 +131,7 @@ int main() {
                 case GLFW_KEY_T:
                     setting_target = true;
                     adding_obstacles = false;
-                    sim->enable_target(); // Включаем цель при переходе в режим установки цели
+                    sim->enable_target();
                     std::cout << "\nMODE: Set Target (click to set flock target)" << std::endl;
                     break;
                     
@@ -160,7 +163,7 @@ int main() {
                     }
                     break;
                     
-                case GLFW_KEY_G: // НОВАЯ КЛАВИША: переключение отображения сетки связей
+                case GLFW_KEY_G:
                     if (sim) {
                         sim->toggle_connections();
                         std::cout << "\nCONNECTIONS: " << (sim->is_connections_display_enabled() ? "SHOW" : "HIDE") << std::endl;
@@ -178,7 +181,7 @@ int main() {
                     std::cout << "C - Clear all obstacles" << std::endl;
                     std::cout << "B - Toggle beta-agents display" << std::endl;
                     std::cout << "X - Remove target (swarm only mode)" << std::endl;
-                    std::cout << "G - Toggle connections display" << std::endl; // НОВОЕ
+                    std::cout << "G - Toggle connections display" << std::endl;
                     std::cout << "H - Show this help" << std::endl;
                     std::cout << "ESC - Exit" << std::endl;
                     std::cout << "=====================================" << std::endl;
@@ -197,12 +200,8 @@ int main() {
         if (ctx && ctx->renderer) ctx->renderer->on_scroll(xoff, yoff);
     });
     
-    // Сохраняем указатель для колбэков
-    glfwSetWindowUserPointer(renderer.get_window(), &ctx);
-    
     // Главный цикл
     auto last_sim_time = std::chrono::steady_clock::now();
-    auto last_frame_time = std::chrono::steady_clock::now();
     
     std::cout << "\n=== FLOCKING SIMULATION CONTROLS ===" << std::endl;
     std::cout << "T - Set target mode (click to set flock target)" << std::endl;
@@ -210,7 +209,7 @@ int main() {
     std::cout << "C - Clear all obstacles" << std::endl;
     std::cout << "B - Toggle beta-agents display" << std::endl;
     std::cout << "X - Remove target (swarm only mode)" << std::endl;
-    std::cout << "G - Toggle connections display" << std::endl; // НОВОЕ
+    std::cout << "G - Toggle connections display" << std::endl;
     std::cout << "H - Show this help" << std::endl;
     std::cout << "ESC - Exit" << std::endl;
     std::cout << "=====================================" << std::endl;

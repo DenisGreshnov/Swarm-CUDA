@@ -39,7 +39,7 @@ cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scrip
 cmake --build . --config Release
 
 ## Параметры
-находятся в simulation.cu 220 строка и simulation.cuh 106 строка
+находятся в simulation.cu во FlockSimulation::FlockSimulation() и simulation.cuh
 
 Перед запуском убедитесь, что glfw3.dll находится в одной папке с flocking_sim.exe, либо доступен через PATH
 
