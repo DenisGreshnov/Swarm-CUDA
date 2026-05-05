@@ -1,13 +1,18 @@
 #pragma once
 
+#ifdef _WIN32
+#include <windows.h>   // <-- обязательно перед GL/gl.h на Windows
+#endif
+
 #include <vector>
 #include <cmath>
 #include <atomic>
 #include <cuda_runtime.h>
+#include <cuda_gl_interop.h>
 
-#define WORLD_BOUNDARY 2000.0
+#define WORLD_BOUNDARY 8000.0
 
-// Простой 2D вектор (используется и на CPU, и на GPU)
+// 2D вектор (CPU + GPU)
 struct Vector2 {
     double x, y;
     __host__ __device__ Vector2(double x = 0, double y = 0) : x(x), y(y) {}
@@ -22,7 +27,7 @@ struct Vector2 {
     }
 };
 
-// Структуры данных для GPU
+// Структуры данных на GPU
 struct Agent {
     Vector2 position;
     Vector2 velocity;
@@ -41,11 +46,12 @@ struct BetaAgent {
     Vector2 velocity;
 };
 
-// Вершина линии для отрисовки связей (совместима с Vertex в рендерере)
+// Вершина для рендеринга (используется и в рендерере, и в CUDA-ядрах)
 struct ConnectionVertex {
     float x, y;
     float r, g, b;
 };
+using Vertex = ConnectionVertex;   // единообразное имя
 
 // Параметры симуляции (константы для ядер)
 struct SimParams {
@@ -63,13 +69,20 @@ struct SimParams {
     Vector2 gamma_velocity;
 };
 
-// Основной класс симуляции (управляет памятью GPU)
 class FlockSimulation {
 public:
     FlockSimulation();
     ~FlockSimulation();
 
+    // Основной шаг (только физика, без рендеринга)
     void step(double delta_time);
+
+    // Заполнение VBO прямо на GPU (вызывается перед отрисовкой)
+    void fill_vbos();
+
+    // Регистрация OpenGL-буферов для CUDA
+    void register_gl_buffers(GLuint vbo_agents, GLuint vbo_beta, GLuint vbo_connections);
+    void unregister_gl_buffers();
 
     // Управление препятствиями и целью
     void add_obstacle(const Vector2& pos, double radius);
@@ -77,34 +90,29 @@ public:
     void set_target(const Vector2& target);
     void remove_target()   { params.use_gamma_target = false; sync_params_to_gpu(); }
     void enable_target()   { params.use_gamma_target = true;  sync_params_to_gpu(); }
+    std::vector<Obstacle> get_obstacles() const { return h_obstacles; }
 
-    // Получение копий для рендеринга
-    std::vector<Agent>      get_agents()      const;
-    std::vector<Obstacle>   get_obstacles()   const;
-    std::vector<BetaAgent>  get_beta_agents() const;
-    Vector2                 get_target()      const { return params.gamma_target; }
+    // Характеристики для рендеринга (без копирования тяжёлых данных)
+    int  get_agent_count()          const { return num_agents; }
+    int  get_beta_count()           const { return h_beta_count; }
+    int  get_max_beta_agents()      const { return max_beta_agents; }
+    int  get_max_connection_vertices() const { return max_connection_vertices; }
+    int  get_connection_vertex_count() const { return h_connection_count; }
+    Vector2 get_target()            const { return params.gamma_target; }
 
-    // Получение геометрии связей (генерируется на GPU)
-    const ConnectionVertex* get_connection_vertices() const { return h_connection_vertices.data(); }
-    int get_connection_vertex_count() const { return h_connection_count; }
-
-    // Управление отображением
+    // Флаги отображения
     void toggle_beta_display()  { show_beta_agents = !show_beta_agents; }
     void toggle_connections()   { show_connections = !show_connections; }
     bool is_target_enabled() const          { return params.use_gamma_target; }
     bool is_beta_display_enabled() const    { return show_beta_agents; }
     bool is_connections_display_enabled() const { return show_connections; }
 
-    // Геттеры параметров для рендеринга связей
-    double get_interaction_range() const { return params.interaction_range; }
-    double get_obstacle_range()   const { return params.obstacle_range; }
-
+    // Управление запуском
     void start() { running = true; }
     void stop()  { running = false; }
     bool is_running() const { return running; }
 
 private:
-    // Параметры на CPU и GPU
     SimParams params;
     SimParams* d_params = nullptr;
 
@@ -122,43 +130,48 @@ private:
     double cell_size;
     int total_cells;
 
-    // Связи для рендеринга (GPU)
-    ConnectionVertex* d_connection_vertices = nullptr;
+    // Ресурсы CUDA-OpenGL interop
+    cudaGraphicsResource_t cuda_vbo_agents = nullptr;
+    cudaGraphicsResource_t cuda_vbo_beta = nullptr;
+    cudaGraphicsResource_t cuda_vbo_connections = nullptr;
+
+    // Счетчик вершин связей (единственная копия на CPU)
+    int h_connection_count = 0;
     int* d_connection_count = nullptr;
+
     int max_connection_vertices;
 
-    // Копии на CPU (для рендеринга)
-    std::vector<Agent>      h_agents;
-    std::vector<Obstacle>   h_obstacles;
-    std::vector<BetaAgent>  h_beta_agents;
+    // CPU‑копии β‑агентов (нужны для физики, но не для рендеринга)
+    std::vector<BetaAgent> h_beta_agents;
     int h_beta_count = 0;
 
-    std::vector<ConnectionVertex> h_connection_vertices;
-    int h_connection_count = 0;
+    //CPU‑хранилище препятствий (для добавления/очистки и отрисовки)
+    std::vector<Obstacle> h_obstacles;
 
     // Флаги
     bool show_beta_agents = false;
     bool show_connections = false;
     std::atomic<bool> running{false};
 
-    // Размеры массивов на GPU
-    int num_agents = 75000;
+    // Размеры массивов
+    int num_agents = 1000000;
     int num_obstacles = 0;
     int max_obstacles = 1000;
     int max_beta_agents = 2000;
 
-    // Вспомогательные методы
+    // Временные CPU‑векторы для инициализации
+    std::vector<Agent> h_agents_init;
+
+    // Внутренние методы
     void allocate_gpu_memory();
     void free_gpu_memory();
     void sync_params_to_gpu();
-    void copy_agents_to_gpu();
+    void copy_agents_to_gpu();       // только при старте
     void copy_obstacles_to_gpu();
-    void copy_beta_agents_from_gpu(int count);
 
-    // Внутренние функции для CUDA-шага
+    // CUDA-шаги
     void generate_beta_agents();
     void compute_forces();
     void integrate(double delta_time);
     void prepare_spatial_hashing();
-    void build_connections();   // генерация геометрии связей на GPU
 };

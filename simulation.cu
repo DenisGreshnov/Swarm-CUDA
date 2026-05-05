@@ -9,7 +9,7 @@
 #include <thrust/device_ptr.h>
 
 // ----------------------------------------------------------------------
-// Вспомогательные функции (σ-норма, bump, φ) для GPU
+// Вспомогательные функции устройства
 // ----------------------------------------------------------------------
 __device__ double sigma_norm_device(const Vector2& z, double epsilon) {
     double n = z.length();
@@ -63,7 +63,7 @@ __device__ double beta_adjacency_device(const Vector2& qi, const Vector2& qb, co
 }
 
 // ----------------------------------------------------------------------
-// Ядро вычисления хэшей для пространственного хэширования
+// Пространственное хэширование (вспомогательные ядра)
 // ----------------------------------------------------------------------
 __global__ void compute_hashes_kernel(
     const Agent* agents, int num_agents,
@@ -71,10 +71,8 @@ __global__ void compute_hashes_kernel(
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= num_agents) return;
-
     double px = agents[i].position.x;
     double py = agents[i].position.y;
-
     int ix = (int)floor((px + world_boundary) / cell_size);
     int iy = (int)floor((py + world_boundary) / cell_size);
     ix = max(0, min(ix, grid_res - 1));
@@ -82,17 +80,12 @@ __global__ void compute_hashes_kernel(
     hashes[i] = iy * grid_res + ix;
 }
 
-// ----------------------------------------------------------------------
-// Ядро построения границ ячеек (cell_start / cell_end) в отсортированном массиве хэшей
-// ----------------------------------------------------------------------
 __device__ int lower_bound_device(const int* arr, int n, int val) {
     int lo = 0, hi = n;
     while (lo < hi) {
         int mid = lo + (hi - lo) / 2;
-        if (arr[mid] < val)
-            lo = mid + 1;
-        else
-            hi = mid;
+        if (arr[mid] < val) lo = mid + 1;
+        else hi = mid;
     }
     return lo;
 }
@@ -101,10 +94,8 @@ __device__ int upper_bound_device(const int* arr, int n, int val) {
     int lo = 0, hi = n;
     while (lo < hi) {
         int mid = lo + (hi - lo) / 2;
-        if (arr[mid] <= val)
-            lo = mid + 1;
-        else
-            hi = mid;
+        if (arr[mid] <= val) lo = mid + 1;
+        else hi = mid;
     }
     return lo;
 }
@@ -115,7 +106,6 @@ __global__ void build_cells_kernel(
 {
     int cell = blockIdx.x * blockDim.x + threadIdx.x;
     if (cell >= total_cells) return;
-
     int start = lower_bound_device(sorted_hashes, num_agents, cell);
     int end = upper_bound_device(sorted_hashes, num_agents, cell);
     cell_start[cell] = start;
@@ -134,19 +124,14 @@ __global__ void generate_beta_agents_kernel(
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int total_pairs = num_agents * num_obstacles;
     if (idx >= total_pairs) return;
-
     int i = idx / num_obstacles;
     int j = idx % num_obstacles;
-
     const Agent& agent = agents[i];
     const Obstacle& obs = obstacles[j];
-
     Vector2 to_obs = obs.position - agent.position;
     double dist = to_obs.length();
-
     if (dist < params.obstacle_range + obs.radius) {
         BetaAgent beta;
-
         if (obs.is_wall) {
             if (fabs(obs.position.x - agent.position.x) < fabs(obs.position.y - agent.position.y)) {
                 beta.position = Vector2(agent.position.x, obs.position.y);
@@ -166,13 +151,9 @@ __global__ void generate_beta_agents_kernel(
                 beta.velocity = Vector2(0,0);
             }
         }
-
         int pos = atomicAdd(beta_counter, 1);
-        if (pos < max_beta) {
-            beta_agents[pos] = beta;
-        } else {
-            atomicSub(beta_counter, 1);
-        }
+        if (pos < max_beta) beta_agents[pos] = beta;
+        else atomicSub(beta_counter, 1);
     }
 }
 
@@ -188,13 +169,9 @@ __global__ void compute_forces_kernel(
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= num_agents) return;
-
     Agent& agent = agents[i];
-    Vector2 alpha_force(0,0);
-    Vector2 beta_force(0,0);
-    Vector2 gamma_force(0,0);
+    Vector2 alpha_force(0,0), beta_force(0,0), gamma_force(0,0);
 
-    // --- α-сила (с использованием пространственного хэширования) ---
     double px = agent.position.x;
     double py = agent.position.y;
     int ix = (int)floor((px + WORLD_BOUNDARY) / cell_size);
@@ -204,12 +181,10 @@ __global__ void compute_forces_kernel(
 
     for (int dy = -1; dy <= 1; ++dy) {
         for (int dx = -1; dx <= 1; ++dx) {
-            int nx = ix + dx;
-            int ny = iy + dy;
+            int nx = ix + dx, ny = iy + dy;
             if (nx < 0 || nx >= grid_res || ny < 0 || ny >= grid_res) continue;
-            int cell_idx = ny * grid_res + nx;
-            int start = cell_start[cell_idx];
-            int end = cell_end[cell_idx];
+            int cell = ny * grid_res + nx;
+            int start = cell_start[cell], end = cell_end[cell];
             for (int j = start; j < end; ++j) {
                 if (i == j) continue;
                 const Agent& other = agents[j];
@@ -219,7 +194,6 @@ __global__ void compute_forces_kernel(
                     double z = sigma_norm_device(diff, params->epsilon);
                     Vector2 n_ij = sigma_epsilon_device(diff, params->epsilon);
                     alpha_force = alpha_force + n_ij * phi_alpha_device(z, *params);
-
                     double a_ij = alpha_adjacency_device(agent.position, other.position, *params);
                     alpha_force = alpha_force + (other.velocity - agent.velocity) * a_ij * (params->c2_alpha / params->c1_alpha);
                 }
@@ -228,7 +202,6 @@ __global__ void compute_forces_kernel(
     }
     alpha_force = alpha_force * params->c1_alpha;
 
-    // --- β-сила ---
     for (int k = 0; k < num_beta; ++k) {
         const BetaAgent& beta = beta_agents[k];
         Vector2 diff = beta.position - agent.position;
@@ -237,14 +210,12 @@ __global__ void compute_forces_kernel(
             double z = sigma_norm_device(diff, params->epsilon);
             Vector2 n_ik = sigma_epsilon_device(diff, params->epsilon);
             beta_force = beta_force + n_ik * phi_beta_device(z, *params);
-
             double b_ik = beta_adjacency_device(agent.position, beta.position, *params);
             beta_force = beta_force + (beta.velocity - agent.velocity) * b_ik * (params->c2_beta / params->c1_beta);
         }
     }
     beta_force = beta_force * params->c1_beta;
 
-    // --- γ-сила ---
     if (params->use_gamma_target) {
         Vector2 diff = agent.position - params->gamma_target;
         double norm = diff.length();
@@ -252,20 +223,73 @@ __global__ void compute_forces_kernel(
         Vector2 vel_term = agent.velocity - params->gamma_velocity;
         gamma_force = pos_term * (-params->c1_gamma) - vel_term * params->c2_gamma;
     }
-
     agent.acceleration = alpha_force + beta_force + gamma_force;
 }
 
 // ----------------------------------------------------------------------
-// Ядро построения геометрии связей (использует пространственное хэширование)
+// Ядра для заполнения VBO (геометрия агентов, β-агентов, связей)
 // ----------------------------------------------------------------------
-__global__ void build_connections_kernel(
+__global__ void build_agents_vbo_kernel(
+    const Agent* agents, int num_agents,
+    Vertex* vbo, int max_vertices)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= num_agents) return;
+    int base = i * 3;
+    if (base + 2 >= max_vertices) return;
+
+    const Agent& a = agents[i];
+    Vector2 dir = a.velocity.length() > 0.1 ? a.velocity.normalized() : Vector2(1, 0);
+    Vector2 perp(-dir.y, dir.x);
+    Vector2 tip = a.position + dir * 5;
+    Vector2 left = a.position - dir * 3 + perp * 3;
+    Vector2 right = a.position - dir * 3 - perp * 3;
+
+    vbo[base]   = { (float)tip.x, (float)tip.y, 0.0f, 0.7f, 1.0f };
+    vbo[base+1] = { (float)left.x, (float)left.y, 0.0f, 0.7f, 1.0f };
+    vbo[base+2] = { (float)right.x, (float)right.y, 0.0f, 0.7f, 1.0f };
+}
+
+__global__ void build_beta_vbo_kernel(
+    const BetaAgent* beta_agents, int num_beta,
+    Vertex* vbo, int max_vertices)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= num_beta) return;
+    int base = i * 8;   // 2 треугольника (6 вершин) + 2 вершины линии
+    if (base + 7 >= max_vertices) return;
+
+    const BetaAgent& b = beta_agents[i];
+    float x = (float)b.position.x, y = (float)b.position.y;
+
+    // Квадрат (два треугольника)
+    vbo[base]   = { x-2, y-2, 1.0f, 0.5f, 0.0f };
+    vbo[base+1] = { x+2, y-2, 1.0f, 0.5f, 0.0f };
+    vbo[base+2] = { x+2, y+2, 1.0f, 0.5f, 0.0f };
+    vbo[base+3] = { x-2, y-2, 1.0f, 0.5f, 0.0f };
+    vbo[base+4] = { x+2, y+2, 1.0f, 0.5f, 0.0f };
+    vbo[base+5] = { x-2, y+2, 1.0f, 0.5f, 0.0f };
+
+    // Линия направления
+    if (b.velocity.length() > 0.5) {
+        Vector2 dir = b.velocity.normalized();
+        float ex = x + (float)dir.x * 6;
+        float ey = y + (float)dir.y * 6;
+        vbo[base+6] = { x, y, 1.0f, 0.5f, 0.0f };
+        vbo[base+7] = { ex, ey, 1.0f, 0.5f, 0.0f };
+    } else {
+        vbo[base+6] = { x, y, 1.0f, 0.5f, 0.0f };
+        vbo[base+7] = { x, y, 1.0f, 0.5f, 0.0f };
+    }
+}
+
+__global__ void build_connections_vbo_kernel(
     const Agent* agents, int num_agents,
     const BetaAgent* beta_agents, int num_beta,
     const SimParams* params,
     const int* cell_start, const int* cell_end,
     int grid_res, double cell_size,
-    ConnectionVertex* connections, int* conn_count,
+    Vertex* connections, int* conn_count,
     int max_vertices)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -280,17 +304,15 @@ __global__ void build_connections_kernel(
     ix = max(0, min(ix, grid_res - 1));
     iy = max(0, min(iy, grid_res - 1));
 
-    // α-α связи (белые) – только если i < j, чтобы не дублировать линии
+    // α-α связи (белые) – только i < j
     for (int dy = -1; dy <= 1; ++dy) {
         for (int dx = -1; dx <= 1; ++dx) {
-            int nx = ix + dx;
-            int ny = iy + dy;
+            int nx = ix + dx, ny = iy + dy;
             if (nx < 0 || nx >= grid_res || ny < 0 || ny >= grid_res) continue;
-            int cell_idx = ny * grid_res + nx;
-            int start = cell_start[cell_idx];
-            int end = cell_end[cell_idx];
+            int cell = ny * grid_res + nx;
+            int start = cell_start[cell], end = cell_end[cell];
             for (int j = start; j < end; ++j) {
-                if (i >= j) continue; // каждая пара один раз
+                if (i >= j) continue;
                 const Agent& other = agents[j];
                 Vector2 diff = other.position - agent.position;
                 double dist = diff.length();
@@ -325,21 +347,16 @@ __global__ void build_connections_kernel(
 }
 
 // ----------------------------------------------------------------------
-// Ядро интегрирования (без изменений)
+// Ядро интегрирования
 // ----------------------------------------------------------------------
 __global__ void integrate_kernel(Agent* agents, int num_agents, double delta_time) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= num_agents) return;
-
     Agent& a = agents[i];
     a.velocity = a.velocity + a.acceleration * delta_time;
-
     double speed = a.velocity.length();
     const double max_speed = 400.0;
-    if (speed > max_speed) {
-        a.velocity = a.velocity.normalized() * max_speed;
-    }
-
+    if (speed > max_speed) a.velocity = a.velocity.normalized() * max_speed;
     a.position = a.position + a.velocity * delta_time;
 
     const double boundary = WORLD_BOUNDARY;
@@ -354,49 +371,47 @@ __global__ void integrate_kernel(Agent* agents, int num_agents, double delta_tim
     }
 }
 
-// ----------------------------------------------------------------------
-// Реализация методов класса FlockSimulation
-// ----------------------------------------------------------------------
+// ======================================================================
+// Реализация FlockSimulation
+// ======================================================================
 FlockSimulation::FlockSimulation() {
-    // Параметры по умолчанию
     params.desired_distance   = 10.0;
     params.interaction_range  = 1.2 * params.desired_distance;
     params.obstacle_range     = 1.2 * 0.6 * params.desired_distance;
-    params.c1_alpha = 30.0;  params.c2_alpha = 15.0;
-    params.c1_beta  = 100.0;  params.c2_beta  = 10.0;
-    params.c1_gamma = 2.0;  params.c2_gamma = 1.0;
+    params.c1_alpha = 50.0;  params.c2_alpha = 2.0;
+    params.c1_beta  = 100.0; params.c2_beta  = 10.0;
+    params.c1_gamma = 7.0;   params.c2_gamma = 0.5;
     params.epsilon = 0.1;
-    params.h_alpha = 0.2;  params.h_beta = 0.9;
-    params.a = 5.0;        params.b = 5.0;
+    params.h_alpha = 0.2;   params.h_beta = 0.9;
+    params.a = 1.0;         params.b = 10.0;
     params.use_gamma_target = true;
     params.gamma_target = Vector2(0,0);
     params.gamma_velocity = Vector2(0,0);
 
-    // Инициализация агентов на CPU
+    // Инициализация агентов на CPU (только для старта)
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis(-WORLD_BOUNDARY*0.75, WORLD_BOUNDARY*0.75);
-    h_agents.resize(num_agents);
+    h_agents_init.resize(num_agents);
     for (int i = 0; i < num_agents; ++i) {
-        h_agents[i].position = Vector2(dis(gen), dis(gen));
-        h_agents[i].velocity = Vector2(dis(gen)/WORLD_BOUNDARY*15, dis(gen)/WORLD_BOUNDARY*15);
-        h_agents[i].acceleration = Vector2(0,0);
+        h_agents_init[i].position = Vector2(dis(gen), dis(gen));
+        h_agents_init[i].velocity = Vector2(dis(gen)/WORLD_BOUNDARY*15, dis(gen)/WORLD_BOUNDARY*15);
+        h_agents_init[i].acceleration = Vector2(0,0);
     }
 
-    // Параметры пространственного хэширования
     cell_size = params.interaction_range * 1.05;
     grid_resolution = (int)ceil(2.0 * WORLD_BOUNDARY / cell_size) + 2;
     total_cells = grid_resolution * grid_resolution;
 
-    // Максимальное количество вершин для отрисовки связей (каждая линия – 2 вершины)
-    max_connection_vertices = num_agents * 64; // запас с избытком
+    max_connection_vertices = num_agents * 64;
 
     allocate_gpu_memory();
-    copy_agents_to_gpu();
+    copy_agents_to_gpu();   // однократная загрузка начальных данных
     sync_params_to_gpu();
 }
 
 FlockSimulation::~FlockSimulation() {
+    unregister_gl_buffers();
     free_gpu_memory();
 }
 
@@ -409,7 +424,6 @@ void FlockSimulation::allocate_gpu_memory() {
     cudaMalloc(&d_hashes, num_agents * sizeof(int));
     cudaMalloc(&d_cell_start, total_cells * sizeof(int));
     cudaMalloc(&d_cell_end, total_cells * sizeof(int));
-    cudaMalloc(&d_connection_vertices, max_connection_vertices * sizeof(ConnectionVertex));
     cudaMalloc(&d_connection_count, sizeof(int));
 }
 
@@ -422,7 +436,6 @@ void FlockSimulation::free_gpu_memory() {
     cudaFree(d_hashes);
     cudaFree(d_cell_start);
     cudaFree(d_cell_end);
-    cudaFree(d_connection_vertices);
     cudaFree(d_connection_count);
 }
 
@@ -431,89 +444,93 @@ void FlockSimulation::sync_params_to_gpu() {
 }
 
 void FlockSimulation::copy_agents_to_gpu() {
-    cudaMemcpy(d_agents, h_agents.data(), num_agents * sizeof(Agent), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_agents, h_agents_init.data(), num_agents * sizeof(Agent), cudaMemcpyHostToDevice);
+    h_agents_init.clear();   // больше не нужны
 }
 
 void FlockSimulation::copy_obstacles_to_gpu() {
     cudaMemcpy(d_obstacles, h_obstacles.data(), num_obstacles * sizeof(Obstacle), cudaMemcpyHostToDevice);
 }
 
-void FlockSimulation::copy_beta_agents_from_gpu(int count) {
-    h_beta_agents.resize(count);
-    cudaMemcpy(h_beta_agents.data(), d_beta_agents, count * sizeof(BetaAgent), cudaMemcpyDeviceToHost);
-    h_beta_count = count;
+// ----------------------------------------------------------------------
+// CUDA-OpenGL interop
+// ----------------------------------------------------------------------
+void FlockSimulation::register_gl_buffers(GLuint vbo_agents, GLuint vbo_beta, GLuint vbo_connections) {
+    cudaGraphicsGLRegisterBuffer(&cuda_vbo_agents, vbo_agents, cudaGraphicsMapFlagsWriteDiscard);
+    cudaGraphicsGLRegisterBuffer(&cuda_vbo_beta, vbo_beta, cudaGraphicsMapFlagsWriteDiscard);
+    cudaGraphicsGLRegisterBuffer(&cuda_vbo_connections, vbo_connections, cudaGraphicsMapFlagsWriteDiscard);
 }
 
-// ----------------------------------------------------------------------
-// Пространственное хэширование
-// ----------------------------------------------------------------------
-void FlockSimulation::prepare_spatial_hashing() {
-    int threads = 256;
-    int blocks = (num_agents + threads - 1) / threads;
-    compute_hashes_kernel<<<blocks, threads>>>(
-        d_agents, num_agents, d_hashes,
-        cell_size, WORLD_BOUNDARY, grid_resolution);
-    thrust::device_ptr<int> hash_ptr(d_hashes);
-    thrust::device_ptr<Agent> agent_ptr(d_agents);
-    thrust::sort_by_key(hash_ptr, hash_ptr + num_agents, agent_ptr);
-    int cell_blocks = (total_cells + threads - 1) / threads;
-    build_cells_kernel<<<cell_blocks, threads>>>(
-        d_hashes, num_agents, d_cell_start, d_cell_end, total_cells);
+void FlockSimulation::unregister_gl_buffers() {
+    if (cuda_vbo_agents) cudaGraphicsUnregisterResource(cuda_vbo_agents);
+    if (cuda_vbo_beta) cudaGraphicsUnregisterResource(cuda_vbo_beta);
+    if (cuda_vbo_connections) cudaGraphicsUnregisterResource(cuda_vbo_connections);
+    cuda_vbo_agents = cuda_vbo_beta = cuda_vbo_connections = nullptr;
 }
 
-// ----------------------------------------------------------------------
-// Построение геометрии связей на GPU
-// ----------------------------------------------------------------------
-void FlockSimulation::build_connections() {
-    cudaMemset(d_connection_count, 0, sizeof(int));
-    if (h_beta_count == 0 && num_agents == 0) {
-        h_connection_count = 0;
-        return;
+void FlockSimulation::fill_vbos() {
+    // --- Агенты ---
+    if (cuda_vbo_agents) {
+        cudaGraphicsMapResources(1, &cuda_vbo_agents);
+        size_t num_bytes;
+        Vertex* d_vbo_agents = nullptr;
+        cudaGraphicsResourceGetMappedPointer((void**)&d_vbo_agents, &num_bytes, cuda_vbo_agents);
+        int max_vert_agents = num_bytes / sizeof(Vertex);
+        int blocks = (num_agents + 255) / 256;
+        build_agents_vbo_kernel<<<blocks, 256>>>(d_agents, num_agents, d_vbo_agents, max_vert_agents);
+        cudaGraphicsUnmapResources(1, &cuda_vbo_agents);
     }
-    int threads = 256;
-    int blocks = (num_agents + threads - 1) / threads;
-    build_connections_kernel<<<blocks, threads>>>(
-        d_agents, num_agents,
-        d_beta_agents, h_beta_count,
-        d_params,
-        d_cell_start, d_cell_end,
-        grid_resolution, cell_size,
-        d_connection_vertices, d_connection_count,
-        max_connection_vertices
-    );
-    cudaMemcpy(&h_connection_count, d_connection_count, sizeof(int), cudaMemcpyDeviceToHost);
-    h_connection_count = std::min(h_connection_count, max_connection_vertices);
-    if (h_connection_count > 0) {
-        h_connection_vertices.resize(h_connection_count);
-        cudaMemcpy(h_connection_vertices.data(), d_connection_vertices,
-                   h_connection_count * sizeof(ConnectionVertex), cudaMemcpyDeviceToHost);
+
+    // --- β-агенты ---
+    if (cuda_vbo_beta && show_beta_agents) {
+        cudaGraphicsMapResources(1, &cuda_vbo_beta);
+        size_t num_bytes;
+        Vertex* d_vbo_beta = nullptr;
+        cudaGraphicsResourceGetMappedPointer((void**)&d_vbo_beta, &num_bytes, cuda_vbo_beta);
+        int max_vert_beta = num_bytes / sizeof(Vertex);
+        int blocks = (h_beta_count + 255) / 256;
+        build_beta_vbo_kernel<<<blocks, 256>>>(d_beta_agents, h_beta_count, d_vbo_beta, max_vert_beta);
+        cudaGraphicsUnmapResources(1, &cuda_vbo_beta);
+    }
+
+    // --- Связи ---
+    if (cuda_vbo_connections && show_connections) {
+        cudaGraphicsMapResources(1, &cuda_vbo_connections);
+        size_t num_bytes;
+        Vertex* d_vbo_conn = nullptr;
+        cudaGraphicsResourceGetMappedPointer((void**)&d_vbo_conn, &num_bytes, cuda_vbo_connections);
+        int max_vert_conn = num_bytes / sizeof(Vertex);
+
+        cudaMemset(d_connection_count, 0, sizeof(int));
+        int blocks = (num_agents + 255) / 256;
+        build_connections_vbo_kernel<<<blocks, 256>>>(
+            d_agents, num_agents,
+            d_beta_agents, h_beta_count,
+            d_params,
+            d_cell_start, d_cell_end,
+            grid_resolution, cell_size,
+            d_vbo_conn, d_connection_count,
+            max_vert_conn
+        );
+        cudaGraphicsUnmapResources(1, &cuda_vbo_connections);
+
+        cudaMemcpy(&h_connection_count, d_connection_count, sizeof(int), cudaMemcpyDeviceToHost);
+        h_connection_count = std::min(h_connection_count, max_connection_vertices);
     } else {
-        h_connection_vertices.clear();
+        h_connection_count = 0;
     }
 }
 
 // ----------------------------------------------------------------------
-// Шаг симуляции
+// Шаг симуляции (только физика)
 // ----------------------------------------------------------------------
 void FlockSimulation::step(double delta_time) {
     if (!running) return;
 
     generate_beta_agents();
     prepare_spatial_hashing();
-
-    // Геометрия связей (только если нужно отображать)
-    if (show_connections) {
-        build_connections();
-    } else {
-        h_connection_count = 0;
-        h_connection_vertices.clear();
-    }
-
     compute_forces();
     integrate(delta_time);
-
-    // Копируем агентов на CPU для рендеринга
-    cudaMemcpy(h_agents.data(), d_agents, num_agents * sizeof(Agent), cudaMemcpyDeviceToHost);
 }
 
 void FlockSimulation::generate_beta_agents() {
@@ -531,22 +548,30 @@ void FlockSimulation::generate_beta_agents() {
         d_beta_agents, d_beta_count,
         params, max_beta_agents
     );
-    int beta_count;
-    cudaMemcpy(&beta_count, d_beta_count, sizeof(int), cudaMemcpyDeviceToHost);
-    beta_count = std::min(beta_count, max_beta_agents);
-    copy_beta_agents_from_gpu(beta_count);
+    cudaMemcpy(&h_beta_count, d_beta_count, sizeof(int), cudaMemcpyDeviceToHost);
+    h_beta_count = std::min(h_beta_count, max_beta_agents);
+    h_beta_agents.resize(h_beta_count);
+    cudaMemcpy(h_beta_agents.data(), d_beta_agents, h_beta_count * sizeof(BetaAgent), cudaMemcpyDeviceToHost);
+    // β-агенты нужны на CPU для следующего вызова compute_forces, поэтому копируем.
+    // (копирование небольшое, альтернатива – хранить в unified memory, оставим так)
+}
+
+void FlockSimulation::prepare_spatial_hashing() {
+    int threads = 256;
+    int blocks = (num_agents + threads - 1) / threads;
+    compute_hashes_kernel<<<blocks, threads>>>(d_agents, num_agents, d_hashes, cell_size, WORLD_BOUNDARY, grid_resolution);
+    thrust::device_ptr<int> hash_ptr(d_hashes);
+    thrust::device_ptr<Agent> agent_ptr(d_agents);
+    thrust::sort_by_key(hash_ptr, hash_ptr + num_agents, agent_ptr);
+    int cell_blocks = (total_cells + threads - 1) / threads;
+    build_cells_kernel<<<cell_blocks, threads>>>(d_hashes, num_agents, d_cell_start, d_cell_end, total_cells);
 }
 
 void FlockSimulation::compute_forces() {
     int threads = 256;
     int blocks = (num_agents + threads - 1) / threads;
-    compute_forces_kernel<<<blocks, threads>>>(
-        d_agents, num_agents,
-        d_beta_agents, h_beta_count,
-        d_params,
-        d_cell_start, d_cell_end,
-        grid_resolution, cell_size
-    );
+    compute_forces_kernel<<<blocks, threads>>>(d_agents, num_agents, d_beta_agents, h_beta_count, d_params,
+                                                d_cell_start, d_cell_end, grid_resolution, cell_size);
 }
 
 void FlockSimulation::integrate(double delta_time) {
@@ -576,16 +601,4 @@ void FlockSimulation::set_target(const Vector2& target) {
     params.gamma_target = target;
     params.use_gamma_target = true;
     sync_params_to_gpu();
-}
-
-std::vector<Agent> FlockSimulation::get_agents() const {
-    return h_agents;
-}
-
-std::vector<Obstacle> FlockSimulation::get_obstacles() const {
-    return h_obstacles;
-}
-
-std::vector<BetaAgent> FlockSimulation::get_beta_agents() const {
-    return h_beta_agents;
 }

@@ -1,5 +1,5 @@
 #pragma once
-#include <GL/glew.h>            // ← ВСЕГДА ПЕРВЫМ
+#include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include "simulation.cuh"
 #include <string>
@@ -10,21 +10,20 @@ private:
     GLFWwindow* window;
     int window_width, window_height;
 
-    // Камера
     Vector2 camera_offset{0.0, 0.0};
     float zoom = 1.0f;
     bool panning = false;
     double last_mouse_x = 0.0, last_mouse_y = 0.0;
 
-    // Измерение времени
     std::chrono::steady_clock::time_point last_frame_time;
     int frame_count = 0;
     double fps = 0.0;
     double frame_time_ms = 0.0;
     double sim_time_ms = 0.0;
 
-    // Шейдерная программа и буферы
     unsigned int shader_program = 0;
+
+    // VAO/VBO для объектов (все используют структуру ConnectionVertex)
     unsigned int vao_agents = 0, vbo_agents = 0;
     unsigned int vao_obstacles = 0, vbo_obstacles = 0;
     unsigned int vao_beta = 0, vbo_beta = 0;
@@ -32,51 +31,34 @@ private:
     unsigned int vao_connections = 0, vbo_connections = 0;
     unsigned int vao_grid = 0, vbo_grid = 0;
 
-    // Функции для построения геометрии
-    void build_agents_geometry(const std::vector<Agent>& agents);
+    // Геометрия препятствий и цели всё ещё строится на CPU (редко меняется)
     void build_obstacles_geometry(const std::vector<Obstacle>& obstacles);
-    void build_beta_geometry(const std::vector<BetaAgent>& beta_agents);
     void build_target_geometry(const Vector2& target, bool enabled);
-    void build_connections_geometry(const FlockSimulation& simulation);
     void build_grid_geometry();
 
-    // Загрузка и компиляция шейдеров
     unsigned int load_shaders(const char* vertex_source, const char* fragment_source);
-
-    // Вычисление текущих границ видимой области с учётом aspect ratio
     void get_visible_bounds(float& left, float& right, float& bottom, float& top) const;
 
 public:
     Renderer(int width = 1000, int height = 800);
     ~Renderer();
 
-    bool initialize();
+    bool initialize(FlockSimulation& simulation);   // принимает ссылку для регистрации VBO
     void render(FlockSimulation& simulation);
     bool should_close() const;
     void poll_events();
 
-    // Установка callback'ов мыши и клавиатуры
     void setup_callbacks(FlockSimulation* sim);
-
-    // Получение состояния
     GLFWwindow* get_window() const { return window; }
-    int get_window_width() const { return window_width; }
-    int get_window_height() const { return window_height; }
-
-    // Обновление размеров окна (например, из колбэка изменения размера)
     void update_window_size(int width, int height) {
         window_width = width;
         window_height = height;
         glViewport(0, 0, width, height);
     }
 
-    // Преобразование координат с учётом камеры
     Vector2 screen_to_world(double screen_x, double screen_y) const;
-
-    // Установка времени симуляции для отображения
     void set_sim_time(double ms) { sim_time_ms = ms; }
 
-    // Обработчики ввода (вызываются из статических callback'ов)
     void on_mouse_button(int button, int action, int mods);
     void on_cursor_pos(double xpos, double ypos);
     void on_scroll(double xoffset, double yoffset);
