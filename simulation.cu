@@ -256,8 +256,8 @@ __global__ void build_beta_vbo_kernel(
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= num_beta) return;
-    int base = i * 8;   // 2 треугольника (6 вершин) + 2 вершины линии
-    if (base + 7 >= max_vertices) return;
+    int base = i * 6;   // теперь только 6 вершин на квадрат
+    if (base + 5 >= max_vertices) return;
 
     const BetaAgent& b = beta_agents[i];
     float x = (float)b.position.x, y = (float)b.position.y;
@@ -269,18 +269,6 @@ __global__ void build_beta_vbo_kernel(
     vbo[base+3] = { x-2, y-2, 1.0f, 0.5f, 0.0f };
     vbo[base+4] = { x+2, y+2, 1.0f, 0.5f, 0.0f };
     vbo[base+5] = { x-2, y+2, 1.0f, 0.5f, 0.0f };
-
-    // Линия направления
-    if (b.velocity.length() > 0.5) {
-        Vector2 dir = b.velocity.normalized();
-        float ex = x + (float)dir.x * 6;
-        float ey = y + (float)dir.y * 6;
-        vbo[base+6] = { x, y, 1.0f, 0.5f, 0.0f };
-        vbo[base+7] = { ex, ey, 1.0f, 0.5f, 0.0f };
-    } else {
-        vbo[base+6] = { x, y, 1.0f, 0.5f, 0.0f };
-        vbo[base+7] = { x, y, 1.0f, 0.5f, 0.0f };
-    }
 }
 
 __global__ void build_connections_vbo_kernel(
@@ -355,7 +343,7 @@ __global__ void integrate_kernel(Agent* agents, int num_agents, double delta_tim
     Agent& a = agents[i];
     a.velocity = a.velocity + a.acceleration * delta_time;
     double speed = a.velocity.length();
-    const double max_speed = 400.0;
+    const double max_speed = 100.0;
     if (speed > max_speed) a.velocity = a.velocity.normalized() * max_speed;
     a.position = a.position + a.velocity * delta_time;
 
@@ -378,9 +366,9 @@ FlockSimulation::FlockSimulation() {
     params.desired_distance   = 10.0;
     params.interaction_range  = 1.2 * params.desired_distance;
     params.obstacle_range     = 1.2 * 0.6 * params.desired_distance;
-    params.c1_alpha = 50.0;  params.c2_alpha = 2.0;
-    params.c1_beta  = 100.0; params.c2_beta  = 10.0;
-    params.c1_gamma = 7.0;   params.c2_gamma = 0.5;
+    params.c1_alpha = 100.0;  params.c2_alpha = 10.0;
+    params.c1_beta  = 1000.0; params.c2_beta  = 10.0;
+    params.c1_gamma = 5.0;   params.c2_gamma = 0.5;
     params.epsilon = 0.1;
     params.h_alpha = 0.2;   params.h_beta = 0.9;
     params.a = 1.0;         params.b = 10.0;

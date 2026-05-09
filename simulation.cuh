@@ -10,7 +10,7 @@
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
 
-#define WORLD_BOUNDARY 8000.0
+#define WORLD_BOUNDARY 4000.0
 
 // 2D вектор (CPU + GPU)
 struct Vector2 {
@@ -154,7 +154,7 @@ private:
     std::atomic<bool> running{false};
 
     // Размеры массивов
-    int num_agents = 1000000;
+    int num_agents = 100000;
     int num_obstacles = 0;
     int max_obstacles = 1000;
     int max_beta_agents = 2000;

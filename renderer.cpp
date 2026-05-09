@@ -106,7 +106,7 @@ bool Renderer::initialize(FlockSimulation& simulation) {
     glGenBuffers(1, &vbo_beta);
     glBindVertexArray(vao_beta);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_beta);
-    glBufferData(GL_ARRAY_BUFFER, simulation.get_max_beta_agents() * 8 * sizeof(ConnectionVertex), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, simulation.get_max_beta_agents() * 6 * sizeof(ConnectionVertex), nullptr, GL_DYNAMIC_DRAW);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(ConnectionVertex), (void*)0);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(ConnectionVertex), (void*)(2*sizeof(float)));
