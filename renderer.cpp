@@ -8,7 +8,6 @@
 #include <iomanip>
 #include <corecrt_math_defines.h>
 
-// Шейдеры
 const char* vertex_shader_source = R"(
 #version 330 core
 layout (location = 0) in vec2 aPos;
@@ -31,23 +30,22 @@ void main() {
 }
 )";
 
-// Вспомогательные функции для CPU-геометрии (препятствия, цель, сетка)
 static void add_triangle(std::vector<ConnectionVertex>& v, Vector2 p1, Vector2 p2, Vector2 p3, float r, float g, float b) {
-    v.push_back({(float)p1.x, (float)p1.y, r, g, b});
-    v.push_back({(float)p2.x, (float)p2.y, r, g, b});
-    v.push_back({(float)p3.x, (float)p3.y, r, g, b});
+    v.push_back({p1.x, p1.y, r, g, b});
+    v.push_back({p2.x, p2.y, r, g, b});
+    v.push_back({p3.x, p3.y, r, g, b});
 }
 static void add_circle(std::vector<ConnectionVertex>& v, Vector2 center, float radius, int seg, float r, float g, float b) {
     for (int i = 0; i < seg; ++i) {
         double a1 = 2.0*M_PI*i/seg, a2 = 2.0*M_PI*(i+1)/seg;
         add_triangle(v, center,
-                     center + Vector2(radius*cos(a1), radius*sin(a1)),
-                     center + Vector2(radius*cos(a2), radius*sin(a2)), r, g, b);
+                     center + Vector2{static_cast<float>(radius*cos(a1)), static_cast<float>(radius*sin(a1))},
+                     center + Vector2{static_cast<float>(radius*cos(a2)), static_cast<float>(radius*sin(a2))}, r, g, b);
     }
 }
 static void add_line(std::vector<ConnectionVertex>& v, Vector2 p1, Vector2 p2, float r, float g, float b) {
-    v.push_back({(float)p1.x, (float)p1.y, r, g, b});
-    v.push_back({(float)p2.x, (float)p2.y, r, g, b});
+    v.push_back({p1.x, p1.y, r, g, b});
+    v.push_back({p2.x, p2.y, r, g, b});
 }
 
 Renderer::Renderer(int width, int height) : window_width(width), window_height(height), window(nullptr) {}
@@ -84,14 +82,12 @@ bool Renderer::initialize(FlockSimulation& simulation) {
     if (!window) { glfwTerminate(); return false; }
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
-    glewExperimental = GL_TRUE;
     if (glewInit() != GLEW_OK) { std::cerr << "Failed to initialize GLEW" << std::endl; return false; }
     glViewport(0, 0, window_width, window_height);
 
     shader_program = load_shaders(vertex_shader_source, fragment_shader_source);
     if (!shader_program) return false;
 
-    // Создание VAO/VBO (размеры под максимальное количество вершин)
     glGenVertexArrays(1, &vao_agents);
     glGenBuffers(1, &vbo_agents);
     glBindVertexArray(vao_agents);
@@ -122,22 +118,19 @@ bool Renderer::initialize(FlockSimulation& simulation) {
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(ConnectionVertex), (void*)(2*sizeof(float)));
     glEnableVertexAttribArray(1);
 
-    // VBO для препятствий и цели (старый механизм)
     glGenVertexArrays(1, &vao_obstacles);
     glGenBuffers(1, &vbo_obstacles);
     glGenVertexArrays(1, &vao_target);
     glGenBuffers(1, &vbo_target);
 
-    // Сетка
     glGenVertexArrays(1, &vao_grid);
     glGenBuffers(1, &vbo_grid);
     build_grid_geometry();
 
-    // Регистрируем буферы в CUDA
     simulation.register_gl_buffers(vbo_agents, vbo_beta, vbo_connections);
 
     last_frame_time = std::chrono::steady_clock::now();
-    std::cout << "Renderer initialized (GPU-driven)" << std::endl;
+    std::cout << "Renderer initialized (GPU-driven, optimized)" << std::endl;
     return true;
 }
 
@@ -228,20 +221,20 @@ void Renderer::render(FlockSimulation& simulation) {
     glUniformMatrix4fv(glGetUniformLocation(shader_program, "uProjection"), 1, GL_FALSE, projection);
     glUniformMatrix4fv(glGetUniformLocation(shader_program, "uView"), 1, GL_FALSE, view);
 
-    // Заполняем VBO на GPU (симуляция)
     simulation.fill_vbos();
 
-    // Препятствия (CPU‑геометрия, обновляется при изменениях) и цель
-    build_obstacles_geometry(simulation.get_obstacles());
-    build_target_geometry(simulation.get_target(), simulation.is_target_enabled());
+    if (obstacles_dirty) {
+        build_obstacles_geometry(simulation.get_obstacles());
+        obstacles_dirty = false;
+    }
+    if (target_dirty) {
+        build_target_geometry(simulation.get_target(), simulation.is_target_enabled());
+        target_dirty = false;
+    }
 
-    // --- Рисование ---
     // Сетка
     glBindVertexArray(vao_grid);
-    int grid_vert_bytes;
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_grid);
-    glGetBufferParameteriv(GL_ARRAY_BUFFER, GL_BUFFER_SIZE, &grid_vert_bytes);
-    glDrawArrays(GL_LINES, 0, grid_vert_bytes / sizeof(ConnectionVertex));
+    glDrawArrays(GL_LINES, 0, grid_vertex_count);
 
     // Связи
     if (simulation.is_connections_display_enabled() && simulation.get_connection_vertex_count() > 0) {
@@ -265,10 +258,10 @@ void Renderer::render(FlockSimulation& simulation) {
         glDrawArrays(GL_LINES, 0, tgt_bytes / sizeof(ConnectionVertex));
     }
 
-    // β‑агенты
+    // β-агенты
     if (simulation.is_beta_display_enabled() && simulation.get_beta_count() > 0) {
         glBindVertexArray(vao_beta);
-        glDrawArrays(GL_TRIANGLES, 0, simulation.get_beta_count() * 8);  // 8 вершин на каждого
+        glDrawArrays(GL_TRIANGLES, 0, simulation.get_beta_count() * 6);
     }
 
     // Агенты
@@ -281,11 +274,10 @@ void Renderer::render(FlockSimulation& simulation) {
     glfwSwapBuffers(window);
 }
 
-// CPU‑геометрия для препятствий и цели (редкие обновления)
 void Renderer::build_obstacles_geometry(const std::vector<Obstacle>& obstacles) {
     std::vector<ConnectionVertex> verts;
     for (const auto& obs : obstacles) {
-        add_circle(verts, obs.position, (float)obs.radius, 32, 0.9f, 0.2f, 0.2f);
+        add_circle(verts, obs.position, obs.radius, 32, 0.9f, 0.2f, 0.2f);
     }
     glBindVertexArray(vao_obstacles);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_obstacles);
@@ -303,13 +295,13 @@ void Renderer::build_target_geometry(const Vector2& target, bool enabled) {
         glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
         return;
     }
-    add_line(verts, target + Vector2(-8,0), target + Vector2(8,0), 0.2f, 0.9f, 0.2f);
-    add_line(verts, target + Vector2(0,-8), target + Vector2(0,8), 0.2f, 0.9f, 0.2f);
+    add_line(verts, target + Vector2{-8,0}, target + Vector2{8,0}, 0.2f, 0.9f, 0.2f);
+    add_line(verts, target + Vector2{0,-8}, target + Vector2{0,8}, 0.2f, 0.9f, 0.2f);
     const int seg = 16;
     for (int i = 0; i < seg; ++i) {
         double a1 = 2.0*M_PI*i/seg, a2 = 2.0*M_PI*(i+1)/seg;
-        add_line(verts, target + Vector2(12*cos(a1), 12*sin(a1)),
-                        target + Vector2(12*cos(a2), 12*sin(a2)), 0.2f, 0.9f, 0.2f);
+        add_line(verts, target + Vector2{static_cast<float>(12*cos(a1)), static_cast<float>(12*sin(a1))},
+                        target + Vector2{static_cast<float>(12*cos(a2)), static_cast<float>(12*sin(a2))}, 0.2f, 0.9f, 0.2f);
     }
     glBindVertexArray(vao_target);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_target);
@@ -325,9 +317,10 @@ void Renderer::build_grid_geometry() {
     float step = 20.0f;
     float range = WORLD_BOUNDARY;
     for (float x = -range; x <= range; x += step)
-        add_line(verts, Vector2(x, -range), Vector2(x, range), 0.3f, 0.3f, 0.3f);
+        add_line(verts, {x, -range}, {x, range}, 0.3f, 0.3f, 0.3f);
     for (float y = -range; y <= range; y += step)
-        add_line(verts, Vector2(-range, y), Vector2(range, y), 0.3f, 0.3f, 0.3f);
+        add_line(verts, {-range, y}, {range, y}, 0.3f, 0.3f, 0.3f);
+    grid_vertex_count = verts.size();
     glBindVertexArray(vao_grid);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_grid);
     glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(ConnectionVertex), verts.data(), GL_STATIC_DRAW);
@@ -337,7 +330,6 @@ void Renderer::build_grid_geometry() {
     glEnableVertexAttribArray(1);
 }
 
-// Обработка камеры (без изменений)
 void Renderer::setup_callbacks(FlockSimulation* sim) {
     glfwSetWindowUserPointer(window, this);
     glfwSetMouseButtonCallback(window, [](GLFWwindow* w, int b, int a, int m) { ((Renderer*)glfwGetWindowUserPointer(w))->on_mouse_button(b,a,m); });
@@ -375,7 +367,7 @@ void Renderer::on_key(int key, int action, int mods) {
             case GLFW_KEY_S: camera_offset.y -= speed; break;
             case GLFW_KEY_A: camera_offset.x -= speed; break;
             case GLFW_KEY_D: camera_offset.x += speed; break;
-            case GLFW_KEY_R: camera_offset = Vector2(0,0); zoom = 1.0f; break;
+            case GLFW_KEY_R: camera_offset = {0,0}; zoom = 1.0f; break;
         }
     }
 }
@@ -384,7 +376,7 @@ Vector2 Renderer::screen_to_world(double sx, double sy) const {
     get_visible_bounds(left, right, bottom, top);
     float wx = left + (float)(sx / window_width) * (right - left);
     float wy = bottom + (float)(1.0 - sy / window_height) * (top - bottom);
-    return Vector2(wx, wy);
+    return {wx, wy};
 }
 bool Renderer::should_close() const { return glfwWindowShouldClose(window); }
 void Renderer::poll_events() { glfwPollEvents(); }

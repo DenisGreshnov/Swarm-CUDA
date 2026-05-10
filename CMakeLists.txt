@@ -18,6 +18,9 @@ add_executable(flocking_sim
     simulation.cu
 )
 
+# Включаем быструю математику для CUDA
+target_compile_options(flocking_sim PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math>)
+
 target_include_directories(flocking_sim PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
@@ -26,5 +29,5 @@ target_link_libraries(flocking_sim
     OpenGL::GL
     glfw
     GLEW::GLEW
-    CUDA::cudart          # <-- этого достаточно, cuda_gl_interop внутри
+    CUDA::cudart
 )

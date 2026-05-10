@@ -52,7 +52,7 @@ void print_simulation_info(const FlockSimulation& simulation) {
 struct AppContext { FlockSimulation* sim; Renderer* renderer; };
 
 int main() {
-    std::cout << "Starting Flocking Simulation (GPU-driven)..." << std::endl;
+    std::cout << "Starting Flocking Simulation (GPU-driven, optimized)..." << std::endl;
     FlockSimulation simulation;
     Renderer renderer(1000, 800);
 
@@ -64,7 +64,7 @@ int main() {
 
     AppContext ctx{&simulation, &renderer};
     glfwSetWindowUserPointer(renderer.get_window(), &ctx);
-    simulation.set_target(Vector2(0,0));
+    simulation.set_target({0,0});
 
     glfwSetFramebufferSizeCallback(renderer.get_window(), [](GLFWwindow* w, int width, int height) {
         auto* ctx = static_cast<AppContext*>(glfwGetWindowUserPointer(w));
@@ -78,8 +78,13 @@ int main() {
             double x, y;
             glfwGetCursorPos(w, &x, &y);
             Vector2 wp = ctx->renderer->screen_to_world(x, y);
-            if (setting_target) ctx->sim->set_target(wp);
-            else if (adding_obstacles) ctx->sim->add_obstacle(wp, 10.0 + (rand()%10));
+            if (setting_target) {
+                ctx->sim->set_target(wp);
+                ctx->renderer->mark_target_dirty();
+            } else if (adding_obstacles) {
+                ctx->sim->add_obstacle(wp, 10.0 + (rand()%10));
+                ctx->renderer->mark_obstacles_dirty();
+            }
         }
     });
     glfwSetKeyCallback(renderer.get_window(), [](GLFWwindow* w, int key, int scancode, int action, int mods) {
@@ -88,11 +93,23 @@ int main() {
         ctx->renderer->on_key(key, action, mods);
         if (action == GLFW_PRESS) {
             switch (key) {
-                case GLFW_KEY_T: setting_target = true; adding_obstacles = false; ctx->sim->enable_target(); break;
-                case GLFW_KEY_O: setting_target = false; adding_obstacles = true; break;
-                case GLFW_KEY_C: ctx->sim->clear_obstacles(); break;
+                case GLFW_KEY_T:
+                    setting_target = true; adding_obstacles = false;
+                    ctx->sim->enable_target();
+                    ctx->renderer->mark_target_dirty();
+                    break;
+                case GLFW_KEY_O:
+                    setting_target = false; adding_obstacles = true;
+                    break;
+                case GLFW_KEY_C:
+                    ctx->sim->clear_obstacles();
+                    ctx->renderer->mark_obstacles_dirty();
+                    break;
                 case GLFW_KEY_B: ctx->sim->toggle_beta_display(); break;
-                case GLFW_KEY_X: ctx->sim->remove_target(); break;
+                case GLFW_KEY_X:
+                    ctx->sim->remove_target();
+                    ctx->renderer->mark_target_dirty();
+                    break;
                 case GLFW_KEY_G: ctx->sim->toggle_connections(); break;
                 case GLFW_KEY_ESCAPE: glfwSetWindowShouldClose(w, GLFW_TRUE); break;
                 case GLFW_KEY_H:
@@ -116,8 +133,8 @@ int main() {
     auto last_sim_time = std::chrono::steady_clock::now();
     while (!renderer.should_close()) {
         auto now = std::chrono::steady_clock::now();
-        double dt = std::chrono::duration<double>(now - last_sim_time).count();
-        dt = std::min(dt, 0.1);
+        float dt = std::chrono::duration<float>(now - last_sim_time).count();
+        dt = std::min(dt, 0.1f);
         auto sim_start = std::chrono::steady_clock::now();
         if (simulation.is_running()) simulation.step(dt);
         auto sim_end = std::chrono::steady_clock::now();
@@ -126,7 +143,6 @@ int main() {
 
         renderer.render(simulation);
         renderer.poll_events();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     simulation.stop();
     std::cout << "\nSimulation stopped." << std::endl;
