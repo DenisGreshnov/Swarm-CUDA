@@ -10,12 +10,11 @@
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
 
-#define WORLD_BOUNDARY 10000.0f
+#define WORLD_BOUNDARY 40000.0f
 
-// 2D вектор (агрегат, конструктор удалён)
+// 2D вектор 
 struct Vector2 {
     float x, y;
-    // методы, возвращающие новый вектор, используют агрегатную инициализацию {}
     __host__ __device__ Vector2 operator+(const Vector2& o) const { return {x+o.x, y+o.y}; }
     __host__ __device__ Vector2 operator-(const Vector2& o) const { return {x-o.x, y-o.y}; }
     __host__ __device__ Vector2 operator*(float s) const { return {x*s, y*s}; }
@@ -75,9 +74,6 @@ struct SimParams {
     float sigma_d_beta;
     float c_phi;
 };
-
-// Декларация постоянной памяти (c_params – агрегат, инициализируется нулями)
-//extern __constant__ SimParams c_params;
 
 class FlockSimulation {
 public:
@@ -158,7 +154,7 @@ private:
     std::atomic<bool> running{false};
 
     // Размеры массивов
-    int num_agents = 2000000;
+    int num_agents = 500;
     int num_obstacles = 0;
     int max_obstacles = 1000;
     int max_beta_agents = 2000;

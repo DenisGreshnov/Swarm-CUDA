@@ -367,12 +367,12 @@ FlockSimulation::FlockSimulation() {
     params.desired_distance   = 10.0f;
     params.interaction_range  = 1.2f * params.desired_distance;
     params.obstacle_range     = 1.2f * 0.6f * params.desired_distance;
-    params.c1_alpha = 100.0f;  params.c2_alpha = 10.0f;
-    params.c1_beta  = 1000.0f; params.c2_beta  = 10.0f;
-    params.c1_gamma = 5.0f;    params.c2_gamma = 0.2f;
+    params.c1_alpha = 20.0f;  params.c2_alpha = 15.0f;
+    params.c1_beta  = 50.0f; params.c2_beta  = 3.0f;
+    params.c1_gamma = 1.0f;    params.c2_gamma = 0.2f;
     params.epsilon = 0.1f;
     params.h_alpha = 0.2f;     params.h_beta = 0.9f;
-    params.a = 1.0f;           params.b = 10.0f;
+    params.a = 5.0f;           params.b = 5.0f;
     params.use_gamma_target = true;
     params.gamma_target = {0.0f, 0.0f};
     params.gamma_velocity = {0.0f, 0.0f};
@@ -390,11 +390,12 @@ FlockSimulation::FlockSimulation() {
 
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_real_distribution<float> dis(-WORLD_BOUNDARY*0.75f, WORLD_BOUNDARY*0.75f);
+    std::uniform_real_distribution<float> dis1(-sqrt(num_agents)*params.desired_distance*0.6f, sqrt(num_agents)*params.desired_distance*0.6f);
+    std::uniform_real_distribution<float> dis2(-10, 10);
     h_agents_init.resize(num_agents);
     for (int i = 0; i < num_agents; ++i) {
-        h_agents_init[i].position = {dis(gen), dis(gen)};
-        h_agents_init[i].velocity = {dis(gen)/WORLD_BOUNDARY*15.0f, dis(gen)/WORLD_BOUNDARY*15.0f};
+        h_agents_init[i].position = {dis1(gen), dis1(gen)};
+        h_agents_init[i].velocity = {dis2(gen), dis2(gen)};
         h_agents_init[i].acceleration = {0,0};
     }
 
@@ -402,7 +403,7 @@ FlockSimulation::FlockSimulation() {
     grid_resolution = (int)ceilf(2.0f * WORLD_BOUNDARY / cell_size) + 2;
     total_cells = grid_resolution * grid_resolution;
 
-    max_connection_vertices = num_agents * 64;
+    max_connection_vertices = num_agents * 10;
     max_blocks_agents = (num_agents + 255) / 256;
 
     allocate_gpu_memory();
@@ -487,8 +488,12 @@ void FlockSimulation::fill_vbos() {
         Vertex* d_vbo_beta = nullptr;
         cudaGraphicsResourceGetMappedPointer((void**)&d_vbo_beta, &num_bytes, cuda_vbo_beta);
         int max_vert_beta = num_bytes / sizeof(Vertex);
-        int blocks = (h_beta_count + 255) / 256;
-        build_beta_vbo_kernel<<<blocks, 256>>>(d_beta_agents, d_beta_count, d_vbo_beta, max_vert_beta);
+
+        // Защита от нулевого количества блоков
+        if (h_beta_count > 0) {
+            int blocks = (h_beta_count + 255) / 256;
+            build_beta_vbo_kernel<<<blocks, 256>>>(d_beta_agents, d_beta_count, d_vbo_beta, max_vert_beta);
+        }
         cudaGraphicsUnmapResources(1, &cuda_vbo_beta);
     }
 

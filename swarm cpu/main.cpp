@@ -1,22 +1,13 @@
+ #define USE_CPU_SIMULATION   // раскомментируйте для CPU‑версии
 #define NOMINMAX
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <sys/ioctl.h>
-#include <unistd.h>
-#endif
 
-int get_console_width() {
-#ifdef _WIN32
-    CONSOLE_SCREEN_BUFFER_INFO csbi;
-    GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi);
-    return csbi.srWindow.Right - csbi.srWindow.Left + 1;
+#ifdef USE_CPU_SIMULATION
+#include "simulation_cpu.h"
+using Simulation = FlockSimulationCPU;
 #else
-    struct winsize w;
-    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-    return w.ws_col;
+#include "simulation.cuh"
+using Simulation = FlockSimulation;
 #endif
-}
 
 #include "renderer.h"
 #include <thread>
@@ -28,7 +19,7 @@ int get_console_width() {
 static bool adding_obstacles = false;
 static bool setting_target = true;
 
-void print_simulation_info(const FlockSimulation& simulation) {
+void print_simulation_info(const Simulation& simulation) {
     static int frame_count = 0;
     frame_count++;
     if (frame_count % 60 == 0) {
@@ -42,18 +33,22 @@ void print_simulation_info(const FlockSimulation& simulation) {
         oss << " | Connections: " << (simulation.is_connections_display_enabled() ? "ON" : "OFF");
         oss << " | Mode: " << (setting_target ? "SET TARGET" : "ADD OBSTACLES");
         std::string info = oss.str();
-        int w = get_console_width();
-        if (info.length() > w) info = info.substr(0, w-3) + "...";
-        else info += std::string(w - info.length(), ' ');
         std::cout << "\r" << info << std::flush;
     }
 }
 
-struct AppContext { FlockSimulation* sim; Renderer* renderer; };
+struct AppContext { Simulation* sim; Renderer* renderer; };
 
 int main() {
-    std::cout << "Starting Flocking Simulation (GPU-driven, optimized)..." << std::endl;
-    FlockSimulation simulation;
+    std::cout << "Starting Flocking Simulation ("
+#ifdef USE_CPU_SIMULATION
+              << "CPU"
+#else
+              << "GPU"
+#endif
+              << " version)..." << std::endl;
+
+    Simulation simulation;
     Renderer renderer(1000, 800);
 
     if (!renderer.initialize(simulation)) {
@@ -66,15 +61,16 @@ int main() {
     glfwSetWindowUserPointer(renderer.get_window(), &ctx);
     simulation.set_target({0,0});
 
-    glfwSetFramebufferSizeCallback(renderer.get_window(), [](GLFWwindow* w, int width, int height) {
+    // Коллбэки (идентичны оригинальным, но используют Simulation)
+    glfwSetFramebufferSizeCallback(renderer.get_window(), [](GLFWwindow* w, int wd, int h) {
         auto* ctx = static_cast<AppContext*>(glfwGetWindowUserPointer(w));
-        if (ctx && ctx->renderer) ctx->renderer->update_window_size(width, height);
+        if (ctx && ctx->renderer) ctx->renderer->update_window_size(wd, h);
     });
-    glfwSetMouseButtonCallback(renderer.get_window(), [](GLFWwindow* w, int button, int action, int mods) {
+    glfwSetMouseButtonCallback(renderer.get_window(), [](GLFWwindow* w, int btn, int act, int mods) {
         auto* ctx = static_cast<AppContext*>(glfwGetWindowUserPointer(w));
         if (!ctx) return;
-        ctx->renderer->on_mouse_button(button, action, mods);
-        if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
+        ctx->renderer->on_mouse_button(btn, act, mods);
+        if (btn == GLFW_MOUSE_BUTTON_LEFT && act == GLFW_PRESS) {
             double x, y;
             glfwGetCursorPos(w, &x, &y);
             Vector2 wp = ctx->renderer->screen_to_world(x, y);
@@ -135,6 +131,7 @@ int main() {
         auto now = std::chrono::steady_clock::now();
         float dt = std::chrono::duration<float>(now - last_sim_time).count();
         dt = std::min(dt, 0.01f);
+
         auto sim_start = std::chrono::steady_clock::now();
         if (simulation.is_running()) simulation.step(dt);
         auto sim_end = std::chrono::steady_clock::now();

@@ -2,7 +2,8 @@
 build/
 out/
 cmake-build-*/
-test/
+test2/
+text/
 
 # Файлы Visual Studio
 .vs/
